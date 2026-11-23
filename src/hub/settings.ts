@@ -139,6 +139,7 @@ export async function handleSettingsSave(
   res: ServerResponse,
   config: Config,
   store: Store,
+  onConfigurationSaved?: (installationId: string) => Promise<void>,
 ): Promise<void> {
   const body = await readBody(req);
   const formData = new URLSearchParams(body.toString());
@@ -189,8 +190,21 @@ export async function handleSettingsSave(
   store.saveConfig(installationId, newConfig, appToken);
   console.log(`[settings] 用户配置已更新: installation_id=${installationId}`);
 
+  // 配置已加密落库后，重启该安装对应的 Bot 连接。
+  let successMessage = "配置已保存成功";
+  if (onConfigurationSaved) {
+    try {
+      const connected = await onConfigurationSaved(installationId);
+      successMessage = connected === false
+        ? "配置已保存，但企业微信 Bot 尚未连接，请检查 BotID、Secret 和网络"
+        : "配置已保存，已提交企业微信 Bot 连接重载";
+    } catch {
+      successMessage = "配置已保存，但企业微信 Bot 重载失败，请检查服务日志";
+    }
+  }
+
   // 显示成功页面，带配置表单
-  renderConfigForm(res, installationId, appToken, store, "配置已保存成功");
+  renderConfigForm(res, installationId, appToken, store, successMessage);
 }
 
 /** 渲染配置编辑表单 */
