@@ -82,7 +82,6 @@ export async function handleSettingsVerify(
   res: ServerResponse,
   config: Config,
   store: Store,
-  onConfigSaved?: (installationId: string) => Promise<void> | void,
 ): Promise<void> {
   const body = await readBody(req);
   const formData = new URLSearchParams(body.toString());
@@ -140,6 +139,7 @@ export async function handleSettingsSave(
   res: ServerResponse,
   config: Config,
   store: Store,
+  onConfigSaved?: (installationId: string) => Promise<void> | void,
 ): Promise<void> {
   const body = await readBody(req);
   const formData = new URLSearchParams(body.toString());
