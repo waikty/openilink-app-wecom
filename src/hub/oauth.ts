@@ -197,6 +197,7 @@ export async function handleOAuthRedirect(
   config: Config,
   store: Store,
   tools?: Record<string, unknown>[],
+  onConfigurationSaved?: (installationId: string) => Promise<void>,
 ): Promise<void> {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
   const code = url.searchParams.get("code");
@@ -289,6 +290,15 @@ export async function handleOAuthRedirect(
         await hubClient.syncTools(tools).catch((err) => {
           console.error("[OAuth] 同步工具失败:", err);
         });
+      }
+    }
+
+    // 只有加密配置落库后才启动该安装的企业微信长连接。
+    if (onConfigurationSaved) {
+      try {
+        await onConfigurationSaved(installation.id);
+      } catch {
+        console.error("[OAuth] 企业微信连接启动失败，安装记录仍已保存:", installation.id);
       }
     }
 
