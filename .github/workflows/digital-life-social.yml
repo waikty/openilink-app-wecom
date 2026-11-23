@@ -1,0 +1,51 @@
+name: Digital Life social ingress
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/lanvia/**"
+      - "src/wecom/**"
+      - "src/config.ts"
+      - "src/index.ts"
+      - "tests/digital-life-bridge.test.ts"
+      - "tests/wecom-event.test.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/digital-life-social.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/lanvia/**"
+      - "src/wecom/**"
+      - "src/config.ts"
+      - "src/index.ts"
+      - "tests/digital-life-bridge.test.ts"
+      - "tests/wecom-event.test.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/digital-life-social.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: digital-life-social-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-social-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: TypeScript build
+        run: npm run build
+      - name: Digital Life social ingress regression
+        run: npm run test:social -- --reporter=dot

@@ -11,8 +11,7 @@ import { handleSettingsPage, handleSettingsVerify, handleSettingsSave } from "./
 import { handleWebhook, readBody } from "./hub/webhook.js";
 import { getManifestJSON, manifest } from "./hub/manifest.js";
 import { HubClient } from "./hub/client.js";
-import { WxToWecom } from "./bridge/wx-to-wecom.js";
-import { WecomToWx } from "./bridge/wecom-to-wx.js";
+import { DigitalLifeBridgeClient } from "./lanvia/digital-life.js";
 import type { WecomMessageData } from "./wecom/event.js";
 import type { HubEvent, ToolResult } from "./hub/types.js";
 
@@ -21,6 +20,29 @@ async function main(): Promise<void> {
   /** 1. 加载配置 */
   const config = loadConfig();
   console.log("[wecom] 配置加载完成, port=%s", config.port);
+
+  const socialBridgeValues = [
+    config.digitalLifeWebhookUrl,
+    config.socialTenantId,
+    config.socialAccountId,
+    config.socialBridgeSecret,
+  ];
+  const socialBridgeConfigured = socialBridgeValues.filter(Boolean).length;
+  if (socialBridgeConfigured !== 0 && socialBridgeConfigured !== socialBridgeValues.length) {
+    throw new Error("DIGITAL_LIFE_SOCIAL_BRIDGE_CONFIGURATION_INCOMPLETE");
+  }
+  const digitalLifeClient = socialBridgeConfigured === socialBridgeValues.length
+    ? new DigitalLifeBridgeClient({
+        webhookUrl: config.digitalLifeWebhookUrl,
+        tenantId: config.socialTenantId,
+        accountId: config.socialAccountId,
+        channel: config.socialChannel,
+        secret: config.socialBridgeSecret,
+      })
+    : null;
+  if (!digitalLifeClient) {
+    console.warn("[wecom] Digital Life bridge is not configured; inbound messages fail closed and will not fall back to Hub AI or legacy forwarding");
+  }
 
   /** 2. 初始化持久化存储 */
   const store = new Store(config.dbPath);
@@ -163,33 +185,36 @@ async function main(): Promise<void> {
     console.log(`[wecom] 事件数据:`, JSON.stringify(event.event?.data));
   }
 
-  /** 5. 初始化双向桥接（仅在配置了企微凭证时启用） */
-  const wxToWecom = wecomClient ? new WxToWecom(wecomClient, store) : null;
-  const wecomToWx = wecomClient ? new WecomToWx(store) : null;
-
-  /** 6. 注册企业微信长连接消息事件（仅在配置了企微凭证时启用） */
+  /** 5. 企业微信消息统一进入 Digital Life；不再走 Hub AI 或微信转发双脑。 */
   if (wecomClient) {
     const _wecomClient = wecomClient;
     registerWecomEvents(_wecomClient.getWSClient(), async (msg: WecomMessageData) => {
-      console.log("[wecom] 收到企业微信消息: userId=%s, type=%s", msg.userId, msg.msgType);
-
-      /** 先尝试命令路由 */
-      const cmdResult = await router.handleCommand(msg.content, {
-        installationId: "",
-        botId: config.wecomBotId,
-        userId: msg.userId,
-        traceId: msg.msgId,
-      });
-      if (cmdResult !== null) {
-        const replyText = typeof cmdResult === "string" ? cmdResult : cmdResult.reply;
-        await _wecomClient.replyStream(msg.frame, replyText);
+      if (msg.messageScope !== "direct") {
+        console.warn("[wecom] 非单聊消息未转发到私人 Digital Life:", msg.messageScope);
         return;
       }
-
-      /** 非命令消息通过桥接转发到微信 */
-      const installations = store.getAllInstallations();
-      if (installations.length > 0 && wecomToWx) {
-        await wecomToWx.handleWecomMessage(msg, installations);
+      if (!digitalLifeClient) {
+        console.error("[wecom] Digital Life 未配置，消息保持未处理；不会回退到 Hub AI 或旧微信转发");
+        return;
+      }
+      if (msg.hasUnsupportedMedia) {
+        console.warn("[wecom] 当前消息包含尚未接通的媒体内容，未把附件 URL 当作文字发送给 AI:", msg.msgType);
+        return;
+      }
+      try {
+        const result = await digitalLifeClient.dispatch(msg);
+        if (result.status === "replied" && result.replyText) {
+          // Only a response signed by the shared AstrBot bridge and carrying
+          // an original Core social-reply grant can reach this send function.
+          await _wecomClient.replyStream(msg.frame, result.replyText);
+        } else if (result.status === "linked") {
+          console.info("[wecom] 企业微信账号已由原 Core 完成绑定；未触发 AI 回复");
+        } else if (result.status === "ignored") {
+          console.info("[wecom] 消息未进入 Digital Life:", result.reason);
+        }
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "UNKNOWN";
+        console.error("[wecom] Digital Life 处理失败；未执行备用 AI 或转发:", code);
       }
     });
   } else {
