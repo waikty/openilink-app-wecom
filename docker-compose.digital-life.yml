@@ -1,0 +1,17 @@
+# Optional override for the unified Digital Life path.
+# Apply only after Core has issued the social bridge secret and AstrBot has
+# registered the matching wecom_bot platform instance and webhook UUID.
+services:
+  wecom-bridge:
+    environment:
+      LANVIA_DIGITAL_LIFE_WEBHOOK_URL: ${LANVIA_DIGITAL_LIFE_WEBHOOK_URL:?AstrBot private webhook URL required}
+      LANVIA_SOCIAL_TENANT_ID: ${LANVIA_SOCIAL_TENANT_ID:?Original Core tenant ID required}
+      LANVIA_SOCIAL_CHANNEL: ${LANVIA_SOCIAL_CHANNEL:-wecom_bot}
+      LANVIA_SOCIAL_ACCOUNT_ID: ${LANVIA_SOCIAL_ACCOUNT_ID:?Core-bound WeCom Bot account ID required}
+      LANVIA_SOCIAL_BRIDGE_SECRET_FILE: /run/secrets/lanvia-social-bridge.key
+    secrets:
+      - lanvia-social-bridge
+
+secrets:
+  lanvia-social-bridge:
+    file: ${LANVIA_SOCIAL_BRIDGE_SECRET_SOURCE:?Host-side secret file path required}
