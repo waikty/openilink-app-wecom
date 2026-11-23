@@ -22,6 +22,12 @@ export interface Config {
   wecomCorpSecret: string;
   /** 应用 AgentId（用于发送应用消息，可选） */
   wecomAgentId: string;
+  /** AstrBot 统一 Digital Life 入站地址（可选；未配置时不回退到跨账号转发） */
+  astrbotSocialWebhookUrl: string;
+  /** AstrBot ↔ Bridge 内部 HMAC 密钥（至少 32 字节） */
+  astrbotSocialBridgeSecret: string;
+  /** Core 中登记的可信租户 ID */
+  socialTenantId: string;
 }
 
 /** 必填配置项清单 — 只有 Hub 和 BaseURL 是必填，企微凭证在云端托管模式下由用户安装时填写 */
@@ -47,6 +53,9 @@ export function loadConfig(
     wecomCorpId: getenv("WECOM_CORP_ID")?.trim() || "",
     wecomCorpSecret: getenv("WECOM_CORP_SECRET")?.trim() || "",
     wecomAgentId: getenv("WECOM_AGENT_ID")?.trim() || "",
+    astrbotSocialWebhookUrl: getenv("ASTRBOT_SOCIAL_WEBHOOK_URL")?.trim() || "",
+    astrbotSocialBridgeSecret: getenv("LANVIA_SOCIAL_BRIDGE_SECRET")?.trim() || "",
+    socialTenantId: getenv("LANVIA_SOCIAL_TENANT_ID")?.trim() || "",
   };
 
   /** 校验必填项 */
