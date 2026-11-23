@@ -11,9 +11,10 @@ import { handleSettingsPage, handleSettingsVerify, handleSettingsSave } from "./
 import { handleWebhook, readBody } from "./hub/webhook.js";
 import { getManifestJSON, manifest } from "./hub/manifest.js";
 import { HubClient } from "./hub/client.js";
-import { WxToWecom } from "./bridge/wx-to-wecom.js";
-import { WecomToWx } from "./bridge/wecom-to-wx.js";
-import type { WecomMessageData } from "./wecom/event.js";
+import { WecomConnectionManager } from "./wecom/connection-manager.js";
+import { AstrBotSocialClient } from "./digital-life/astrbot-social-client.js";
+import { handleWecomMessageWithDigitalLife } from "./digital-life/wecom-handler.js";
+import { handleIlinkHubEventWithDigitalLife } from "./digital-life/ilink-handler.js";
 import type { HubEvent, ToolResult } from "./hub/types.js";
 
 /** 应用主入口 */
@@ -26,29 +27,33 @@ async function main(): Promise<void> {
   const store = new Store(config.dbPath);
   console.log("[wecom] 数据库已连接: %s", config.dbPath);
 
-  /** 3. 创建企业微信客户端并启动长连接（如果环境变量中配置了企微凭证） */
-  const hasWecomCredentials = !!(config.wecomBotId && config.wecomBotSecret);
-  let wecomClient: WecomClient | null = null;
-  if (hasWecomCredentials) {
-    wecomClient = new WecomClient(
-      config.wecomBotId,
-      config.wecomBotSecret,
-      config.wecomCorpId || undefined,
-      config.wecomCorpSecret || undefined,
-      config.wecomAgentId || undefined,
-    );
-    await wecomClient.start();
-    console.log("[wecom] 企业微信客户端已启动");
-  } else {
-    console.log("[wecom] 未配置企微凭证，跳过默认客户端初始化（云端托管模式，用户安装时填写）");
+  /** 3. 统一 AI 入口：所有渠道只连接 AstrBot / Digital Life，不启用 Hub 内置 AI */
+  const socialParts = [
+    config.astrbotSocialWebhookUrl,
+    config.astrbotSocialBridgeSecret,
+    config.socialTenantId,
+  ];
+  const socialConfigured = socialParts.every(Boolean);
+  if (socialParts.some(Boolean) && !socialConfigured) {
+    throw new Error("ASTRBOT_SOCIAL_CONFIG_INCOMPLETE");
+  }
+  const socialClient = socialConfigured
+    ? new AstrBotSocialClient({
+        webhookUrl: config.astrbotSocialWebhookUrl,
+        bridgeSecret: config.astrbotSocialBridgeSecret,
+        tenantId: config.socialTenantId,
+      })
+    : null;
+  if (!socialClient) {
+    console.warn("[wecom] AstrBot 社交入口未配置；不回退到微信/企微互相转发");
   }
 
-  /** 4. 收集所有 AI Tools 并创建路由（如果没有默认客户端则用空凭证客户端仅收集定义） */
-  const toolsSdkClient = wecomClient ?? new WecomClient("", "");
-  const { definitions, handlers } = collectAllTools(toolsSdkClient);
-  const router = new Router();
-  router.register(definitions, handlers);
-  console.log("[wecom] 已注册 %d 个 AI Tools", definitions.length);
+  /** 工具定义与每个安装的执行器分离，工具执行时使用对应安装的凭证 */
+  const toolsSdkClient = new WecomClient("", "");
+  const { definitions } = collectAllTools(toolsSdkClient);
+  console.log("[wecom] 已注册 %d 个企业微信工具定义", definitions.length);
+
+  let wecomConnections: WecomConnectionManager;
 
   /** 将工具定义和 URL 注入到清单中 */
   manifest.tools = definitions;
@@ -112,6 +117,11 @@ async function main(): Promise<void> {
     const data = event.event?.data;
     if (!data) return "缺少事件数据";
 
+    const client = wecomConnections?.getClient(installationId);
+    if (!client) {
+      return "当前安装尚未连接企业微信 Bot，请先在设置中配置 BotID 和 Secret";
+    }
+    const { handlers } = collectAllTools(client);
     const command = data.command as string;
     const args = (data.args as Record<string, any>) ?? {};
     const userId = data.user_id as string;
@@ -159,42 +169,80 @@ async function main(): Promise<void> {
       return;
     }
 
-    // TODO: 根据事件类型分发处理
-    console.log(`[wecom] 事件数据:`, JSON.stringify(event.event?.data));
+    if (!socialClient) {
+      console.warn("[wecom] iLink 消息未接入：AstrBot 社交入口尚未配置");
+      return;
+    }
+    try {
+      const result = await handleIlinkHubEventWithDigitalLife(
+        socialClient,
+        new HubClient(installation.hubUrl, installation.appToken),
+        event,
+        installation,
+      );
+      console.log("[wecom] iLink → Digital Life status=%s installation=%s",
+        result.status, installation.id);
+    } catch (error) {
+      console.error("[wecom] iLink → Digital Life failed; installation=%s code=%s",
+        installation.id,
+        error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)
+          ? error.message
+          : "UNCLASSIFIED");
+    }
   }
 
-  /** 5. 初始化双向桥接（仅在配置了企微凭证时启用） */
-  const wxToWecom = wecomClient ? new WxToWecom(wecomClient, store) : null;
-  const wecomToWx = wecomClient ? new WecomToWx(store) : null;
+  /** 5. 每个 Hub 安装从本地加密配置读取自己的 WeCom Bot 凭证 */
+  wecomConnections = new WecomConnectionManager({
+    store,
+    fallback: {
+      botId: config.wecomBotId,
+      botSecret: config.wecomBotSecret,
+      corpId: config.wecomCorpId,
+      corpSecret: config.wecomCorpSecret,
+      agentId: config.wecomAgentId,
+    },
+    onMessage: async (installation, accountId, client, msg) => {
+      console.log("[wecom] inbound installation=%s type=%s scope=%s",
+        installation.id, msg.msgType, msg.messageScope);
 
-  /** 6. 注册企业微信长连接消息事件（仅在配置了企微凭证时启用） */
-  if (wecomClient) {
-    const _wecomClient = wecomClient;
-    registerWecomEvents(_wecomClient.getWSClient(), async (msg: WecomMessageData) => {
-      console.log("[wecom] 收到企业微信消息: userId=%s, type=%s", msg.userId, msg.msgType);
-
-      /** 先尝试命令路由 */
-      const cmdResult = await router.handleCommand(msg.content, {
-        installationId: "",
-        botId: config.wecomBotId,
-        userId: msg.userId,
-        traceId: msg.msgId,
-      });
-      if (cmdResult !== null) {
-        const replyText = typeof cmdResult === "string" ? cmdResult : cmdResult.reply;
-        await _wecomClient.replyStream(msg.frame, replyText);
-        return;
+      // Explicit slash commands remain direct tool invocations, not another AI.
+      if (msg.msgType === "text") {
+        const { handlers } = collectAllTools(client);
+        const commandText = msg.content.trim();
+        if (commandText.startsWith("/")) {
+          const space = commandText.indexOf(" ");
+          const command = space > 0 ? commandText.slice(0, space) : commandText;
+          const argsText = space > 0 ? commandText.slice(space + 1).trim() : "";
+          const handler = handlers.get(command);
+          if (handler) {
+            let args: Record<string, unknown> = {};
+            try { args = argsText ? JSON.parse(argsText) : {}; }
+            catch { args = { text: argsText }; }
+            const result = await handler({
+              installationId: installation.id,
+              botId: installation.botId,
+              userId: msg.userId,
+              traceId: msg.msgId,
+              args,
+            });
+            const replyText = typeof result === "string" ? result : result.reply;
+            await client.replyStream(msg.frame, replyText);
+            return;
+          }
+        }
       }
 
-      /** 非命令消息通过桥接转发到微信 */
-      const installations = store.getAllInstallations();
-      if (installations.length > 0 && wecomToWx) {
-        await wecomToWx.handleWecomMessage(msg, installations);
-      }
-    });
-  } else {
-    console.log("[wecom] 未配置企微凭证，跳过长连接消息事件注册");
-  }
+      if (!socialClient) return;
+      const result = await handleWecomMessageWithDigitalLife(
+        socialClient, client, accountId, msg,
+      );
+      console.log("[wecom] WeCom → Digital Life status=%s installation=%s",
+        result.status, installation.id);
+    },
+  });
+  const connectionSummary = await wecomConnections.startAll();
+  console.log("[wecom] per-installation Bot connections connected=%d skipped=%d",
+    connectionSummary.connected, connectionSummary.skipped);
 
   /** 7. 启动 HTTP 服务 */
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -236,7 +284,10 @@ async function main(): Promise<void> {
 
       /** POST /settings/save — 保存修改后的配置 */
       if (req.method === "POST" && pathname === "/settings/save") {
-        await handleSettingsSave(req, res, config, store);
+        await handleSettingsSave(
+          req, res, config, store,
+          async (installationId) => { await wecomConnections.restartInstallation(installationId); },
+        );
         return;
       }
 
@@ -244,7 +295,10 @@ async function main(): Promise<void> {
       if (pathname === "/oauth/redirect") {
         if (req.method === "GET") {
           // 模式 1: OAuth PKCE 回调
-          await handleOAuthRedirect(req, res, config, store, toolsForHub);
+          await handleOAuthRedirect(
+            req, res, config, store, toolsForHub,
+            async (installationId) => { await wecomConnections.restartInstallation(installationId); },
+          );
         } else if (req.method === "POST") {
           // 模式 2: Hub 直接安装通知
           const body = await readBody(req);
@@ -265,6 +319,7 @@ async function main(): Promise<void> {
                 store.saveConfig(data.installation_id, remoteCfg, data.app_token);
                 console.log("[wecom] 模式2: 已拉取并加密保存配置:", data.installation_id);
               }
+              return wecomConnections.restartInstallation(data.installation_id);
             })
             .catch((err) => console.error("[wecom] 模式2: 拉取配置失败:", err));
           // 异步同步 tools 到 Hub
@@ -307,7 +362,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     console.log("[wecom] 收到 %s 信号，正在关闭...", signal);
     server.close();
-    if (wecomClient) await wecomClient.stop();
+    await wecomConnections.stopAll();
     store.close();
     console.log("[wecom] 已安全关闭");
     process.exit(0);
