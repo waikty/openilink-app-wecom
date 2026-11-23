@@ -197,6 +197,7 @@ export async function handleOAuthRedirect(
   config: Config,
   store: Store,
   tools?: Record<string, unknown>[],
+  onInstalled?: (installation: Installation) => Promise<void> | void,
 ): Promise<void> {
   const url = new URL(req.url || "/", `http://${req.headers.host}`);
   const code = url.searchParams.get("code");
@@ -289,6 +290,14 @@ export async function handleOAuthRedirect(
         await hubClient.syncTools(tools).catch((err) => {
           console.error("[OAuth] 同步工具失败:", err);
         });
+      }
+    }
+
+    if (onInstalled) {
+      try {
+        await onInstalled(installation);
+      } catch (err) {
+        console.error("[OAuth] 企业微信客户端启动失败，安装记录已保留:", err);
       }
     }
 
