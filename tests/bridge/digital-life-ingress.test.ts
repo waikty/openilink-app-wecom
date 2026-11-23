@@ -147,14 +147,18 @@ describe("DigitalLifeIngress", () => {
   });
 
   it("preserves multiline text and accepts the SDK's voice transcription", async () => {
-    const ingress = createIngress(({ payload }) => doneReceipt({
-      message_id: createHash("sha256").update(JSON.stringify([
-        "tenant-a", "wecom_bot", "wecom-bot-001", "wecom-msg-001",
-      ])).digest("hex"),
-      reply_authorized: false,
-      reply_grant_id: null,
-      reply_text: null,
-    }));
+    const ingress = createIngress(({ payload }) => {
+      const messageId = createHash("sha256").update(JSON.stringify([
+        "tenant-a", String(payload.channel), String(payload.account_id),
+        String(payload.message_id),
+      ])).digest("hex");
+      return doneReceipt({
+        message_id: messageId,
+        reply_authorized: false,
+        reply_grant_id: null,
+        reply_text: null,
+      });
+    });
     const multiline = await ingress.dispatch(message({ content: "第一行\n第二行" }));
     expect(multiline.replyAuthorized).toBe(false);
     const voice = await ingress.dispatch(message({
