@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-export type DigitalLifeChannel = "wecom_bot" | "wecom_agent";
+export type DigitalLifeChannel = "ilink" | "wecom_bot" | "wecom_agent";
 
 export interface AstrBotSocialClientOptions {
   webhookUrl: string;
@@ -12,6 +12,7 @@ export interface AstrBotSocialClientOptions {
 
 export interface SocialInboundMessage {
   channel: DigitalLifeChannel;
+  messageScope: "direct" | "group";
   accountId: string;
   conversationId: string;
   externalUserId: string;
@@ -112,8 +113,11 @@ export class AstrBotSocialClient {
   }
 
   async dispatch(message: SocialInboundMessage): Promise<SocialReplyResult> {
-    if (message.channel !== "wecom_bot" && message.channel !== "wecom_agent") {
+    if (!["ilink", "wecom_bot", "wecom_agent"].includes(message.channel)) {
       throw new Error("SOCIAL_CHANNEL_NOT_SUPPORTED");
+    }
+    if (message.messageScope !== "direct") {
+      throw new Error("SOCIAL_DIRECT_MESSAGE_REQUIRED");
     }
     const accountId = requiredText(message.accountId, "SOCIAL_ACCOUNT_REQUIRED", 256);
     const conversationId = requiredText(message.conversationId, "SOCIAL_CONVERSATION_REQUIRED", 256);
@@ -144,7 +148,7 @@ export class AstrBotSocialClient {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Lanvia-Source": "wecom",
+        "X-Lanvia-Source": message.channel === "ilink" ? "openilink" : "wecom",
         "X-Lanvia-Social-Timestamp": timestamp,
         "X-Lanvia-Social-Nonce": nonce,
         "X-Lanvia-Social-Signature": requestSignature,
