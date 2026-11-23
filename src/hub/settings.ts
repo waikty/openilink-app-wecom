@@ -82,6 +82,7 @@ export async function handleSettingsVerify(
   res: ServerResponse,
   config: Config,
   store: Store,
+  onConfigSaved?: (installationId: string) => Promise<void> | void,
 ): Promise<void> {
   const body = await readBody(req);
   const formData = new URLSearchParams(body.toString());
@@ -188,6 +189,14 @@ export async function handleSettingsSave(
   // 加密保存
   store.saveConfig(installationId, newConfig, appToken);
   console.log(`[settings] 用户配置已更新: installation_id=${installationId}`);
+
+  if (onConfigSaved) {
+    try {
+      await onConfigSaved(installationId);
+    } catch (err) {
+      console.error("[settings] 配置已保存，但企业微信客户端重启失败:", err);
+    }
+  }
 
   // 显示成功页面，带配置表单
   renderConfigForm(res, installationId, appToken, store, "配置已保存成功");
