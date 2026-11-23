@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 /**
  * 应用配置接口定义
  * 注意：wecomBotId / wecomBotSecret 等企微凭证在云端托管模式下为可选，
@@ -22,6 +24,16 @@ export interface Config {
   wecomCorpSecret: string;
   /** 应用 AgentId（用于发送应用消息，可选） */
   wecomAgentId: string;
+  /** AstrBot 已注册的统一 Digital Life webhook URL */
+  digitalLifeWebhookUrl: string;
+  /** Core 已登记的 Owner 租户 ID */
+  socialTenantId: string;
+  /** 按渠道签名的内部桥接密钥；优先从只读 secret 文件读取 */
+  socialBridgeSecret: string;
+  /** 当前企业微信 Bot 在 Digital Life 中的渠道标识 */
+  socialChannel: "wecom_bot" | "wecom_agent";
+  /** 必须与 Core 侧渠道绑定记录中的 account_id 一致 */
+  socialAccountId: string;
 }
 
 /** 必填配置项清单 — 只有 Hub 和 BaseURL 是必填，企微凭证在云端托管模式下由用户安装时填写 */
@@ -47,7 +59,16 @@ export function loadConfig(
     wecomCorpId: getenv("WECOM_CORP_ID")?.trim() || "",
     wecomCorpSecret: getenv("WECOM_CORP_SECRET")?.trim() || "",
     wecomAgentId: getenv("WECOM_AGENT_ID")?.trim() || "",
+    digitalLifeWebhookUrl: getenv("LANVIA_DIGITAL_LIFE_WEBHOOK_URL")?.trim() || "",
+    socialTenantId: getenv("LANVIA_SOCIAL_TENANT_ID")?.trim() || "",
+    socialBridgeSecret: readSocialBridgeSecret(getenv),
+    socialChannel: (getenv("LANVIA_SOCIAL_CHANNEL")?.trim() || "wecom_bot") as "wecom_bot" | "wecom_agent",
+    socialAccountId: getenv("LANVIA_SOCIAL_ACCOUNT_ID")?.trim() || getenv("WECOM_BOT_ID")?.trim() || "",
   };
+
+  if (!["wecom_bot", "wecom_agent"].includes(cfg.socialChannel)) {
+    throw new Error("LANVIA_SOCIAL_CHANNEL must be wecom_bot or wecom_agent");
+  }
 
   /** 校验必填项 */
   const missing = REQUIRED_KEYS.filter((k) => !cfg[k]);
@@ -56,4 +77,19 @@ export function loadConfig(
   }
 
   return cfg;
+}
+
+
+function readSocialBridgeSecret(
+  getenv: (key: string) => string | undefined,
+): string {
+  const secretPath = getenv("LANVIA_SOCIAL_BRIDGE_SECRET_FILE")?.trim();
+  if (secretPath) {
+    try {
+      return readFileSync(secretPath, "utf8").trim();
+    } catch {
+      throw new Error("LANVIA_SOCIAL_BRIDGE_SECRET_FILE cannot be read");
+    }
+  }
+  return getenv("LANVIA_SOCIAL_BRIDGE_SECRET")?.trim() || "";
 }
