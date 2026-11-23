@@ -3,6 +3,8 @@
  * 注意：wecomBotId / wecomBotSecret 等企微凭证在云端托管模式下为可选，
  * 用户会在 OAuth setup 页面自行填写并加密存储到本地数据库。
  */
+import { isAbsolute } from "node:path";
+
 export interface Config {
   /** HTTP 监听端口，默认 "8085" */
   port: string;
@@ -22,6 +24,14 @@ export interface Config {
   wecomCorpSecret: string;
   /** 应用 AgentId（用于发送应用消息，可选） */
   wecomAgentId: string;
+  /** AstrBot 现有社交 Webhook 完整 HTTPS 地址；不配置则不接入 Digital Life */
+  digitalLifeWebhookUrl: string;
+  /** 原 Core 可信租户 ID */
+  digitalLifeTenantId: string;
+  /** 可选的固定 WeCom Bot accountId；留空时使用安装配置中的 BotID */
+  digitalLifeAccountId: string;
+  /** 与 AstrBot 共享的内部签名密钥文件，必须是绝对路径 */
+  digitalLifeSecretFile: string;
 }
 
 /** 必填配置项清单 — 只有 Hub 和 BaseURL 是必填，企微凭证在云端托管模式下由用户安装时填写 */
@@ -47,12 +57,31 @@ export function loadConfig(
     wecomCorpId: getenv("WECOM_CORP_ID")?.trim() || "",
     wecomCorpSecret: getenv("WECOM_CORP_SECRET")?.trim() || "",
     wecomAgentId: getenv("WECOM_AGENT_ID")?.trim() || "",
+    digitalLifeWebhookUrl: getenv("LANVIA_ASTRBOT_WEBHOOK_URL")?.trim() || "",
+    digitalLifeTenantId: getenv("LANVIA_ASTRBOT_TENANT_ID")?.trim() || "",
+    digitalLifeAccountId: getenv("LANVIA_ASTRBOT_ACCOUNT_ID")?.trim() || "",
+    digitalLifeSecretFile: getenv("LANVIA_ASTRBOT_SECRET_FILE")?.trim() || "",
   };
 
   /** 校验必填项 */
   const missing = REQUIRED_KEYS.filter((k) => !cfg[k]);
   if (missing.length > 0) {
     throw new Error(`缺少必填配置项: ${missing.join(", ")}`);
+  }
+
+  const socialBridgeValues = [cfg.digitalLifeWebhookUrl, cfg.digitalLifeTenantId, cfg.digitalLifeSecretFile];
+  const configuredSocialBridgeValues = socialBridgeValues.filter(Boolean).length;
+  if (configuredSocialBridgeValues !== 0 && configuredSocialBridgeValues !== socialBridgeValues.length) {
+    throw new Error("Digital Life 接入配置不完整：需要同时配置 LANVIA_ASTRBOT_WEBHOOK_URL、LANVIA_ASTRBOT_TENANT_ID、LANVIA_ASTRBOT_SECRET_FILE");
+  }
+  if (cfg.digitalLifeWebhookUrl && !cfg.digitalLifeWebhookUrl.startsWith("https://")) {
+    throw new Error("LANVIA_ASTRBOT_WEBHOOK_URL 必须使用 HTTPS");
+  }
+  if (cfg.digitalLifeSecretFile && !isAbsolute(cfg.digitalLifeSecretFile)) {
+    throw new Error("LANVIA_ASTRBOT_SECRET_FILE 必须是绝对路径");
+  }
+  if (cfg.digitalLifeAccountId && !/^[A-Za-z0-9._:-]{1,256}$/.test(cfg.digitalLifeAccountId)) {
+    throw new Error("LANVIA_ASTRBOT_ACCOUNT_ID 格式无效");
   }
 
   return cfg;
