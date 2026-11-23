@@ -278,8 +278,13 @@ export async function handleOAuthRedirect(
       try {
         const remoteConfig = await hubClient.fetchConfig();
         if (Object.keys(remoteConfig).length > 0) {
-          store.saveConfig(installation.id, remoteConfig, installation.appToken);
-          console.log(`[OAuth] 已拉取并加密保存配置: ${installation.id}`);
+          const existingConfig = store.getConfig(installation.id, installation.appToken) ?? {};
+          store.saveConfig(
+            installation.id,
+            { ...existingConfig, ...remoteConfig },
+            installation.appToken,
+          );
+          console.log(`[OAuth] 已合并并加密保存配置: ${installation.id}`);
         }
       } catch (err) {
         console.error("[OAuth] 拉取配置失败:", err);
