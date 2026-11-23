@@ -1,7 +1,7 @@
 {
   "name": "@openilink/app-wecom",
-  "version": "0.1.0",
-  "description": "OpeniLink Hub App — 微信 ↔ 企业微信双向桥接 + 企业微信 AI Tools",
+  "version": "0.2.0",
+  "description": "OpeniLink Hub App — 企业微信接入同一个 Lanvia Digital Life + 企业微信 AI Tools",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
