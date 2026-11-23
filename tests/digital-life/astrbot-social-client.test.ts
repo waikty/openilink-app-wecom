@@ -46,10 +46,8 @@ function messageId(input: SocialInboundMessage): string {
     .digest("hex");
 }
 
-function signedResponse(input: SocialInboundMessage, receiptOverrides: Record<string, unknown> = {}) {
-  const timestamp = "1800000000";
-  const nonce = "nonce_0123456789abcdef";
-  const receipt = {
+function makeReceipt(input: SocialInboundMessage, receiptOverrides: Record<string, unknown> = {}) {
+  return {
     schema: "LANVIA_SOCIAL_NATIVE_DRAFT_PROCESSED_V1",
     owner_code: "U001",
     channel: input.channel,
@@ -64,12 +62,25 @@ function signedResponse(input: SocialInboundMessage, receiptOverrides: Record<st
     reply_text: "A single Digital Life reply",
     ...receiptOverrides,
   };
-  return {
-    timestamp,
-    nonce,
-    receipt,
-    response_signature: sign(timestamp, nonce, stableJson(receipt)),
-  };
+}
+
+function queueSignedResponse(
+  fetcher: ReturnType<typeof vi.fn>,
+  receipt: Record<string, unknown>,
+  overrides: { signature?: string } = {},
+) {
+  fetcher.mockImplementationOnce(async (_url: string, init: RequestInit) => {
+    const headers = init.headers as Record<string, string>;
+    const responseSignature = overrides.signature ??
+      sign(
+        headers["X-Lanvia-Social-Timestamp"],
+        headers["X-Lanvia-Social-Nonce"],
+        stableJson(receipt),
+      );
+    return new Response(JSON.stringify({
+      ok: true, receipt, response_signature: responseSignature,
+    }), { status: 200 });
+  });
 }
 
 describe("AstrBotSocialClient", () => {
@@ -88,12 +99,8 @@ describe("AstrBotSocialClient", () => {
 
   it("sends signed direct WeCom messages and accepts only Core-authorized reply drafts", async () => {
     const input = message("wecom_bot");
-    const result = signedResponse(input);
-    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({
-      ok: true,
-      receipt: result.receipt,
-      response_signature: result.response_signature,
-    }), { status: 200 }));
+    const receipt = makeReceipt(input);
+    queueSignedResponse(fetcher, receipt);
 
     const reply = await client.dispatch(input);
     expect(reply).toEqual({
@@ -129,10 +136,8 @@ describe("AstrBotSocialClient", () => {
 
   it("uses the verified OpeniLink source for personal iLink messages", async () => {
     const input = message("ilink");
-    const result = signedResponse(input);
-    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({
-      ok: true, receipt: result.receipt, response_signature: result.response_signature,
-    }), { status: 200 }));
+    const receipt = makeReceipt(input);
+    queueSignedResponse(fetcher, receipt);
     const reply = await client.dispatch(input);
     expect(reply.status).toBe("reply-authorized");
     const headers = fetcher.mock.calls[0][1].headers as Record<string, string>;
@@ -141,14 +146,12 @@ describe("AstrBotSocialClient", () => {
 
   it("never returns a sendable reply when Core has not granted the social Access Pass", async () => {
     const input = message();
-    const result = signedResponse(input, {
+    const receipt = makeReceipt(input, {
       reply_authorized: false,
       reply_grant_id: null,
       reply_text: null,
     });
-    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({
-      ok: true, receipt: result.receipt, response_signature: result.response_signature,
-    }), { status: 200 }));
+    queueSignedResponse(fetcher, receipt);
     expect(await client.dispatch(input)).toEqual({
       status: "reply-blocked",
       channel: "wecom_bot",
@@ -169,13 +172,7 @@ describe("AstrBotSocialClient", () => {
       runner_executed: false,
       memory_written: false,
     };
-    const timestamp = "1800000000";
-    const nonce = "nonce_0123456789abcdef";
-    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({
-      ok: true,
-      receipt,
-      response_signature: sign(timestamp, nonce, stableJson(receipt)),
-    }), { status: 200 }));
+    queueSignedResponse(fetcher, receipt);
     expect(await client.dispatch(input)).toEqual({
       status: "duplicate",
       channel: "wecom_bot",
@@ -185,12 +182,10 @@ describe("AstrBotSocialClient", () => {
 
   it("rejects forged response signatures", async () => {
     const input = message();
-    const result = signedResponse(input);
-    fetcher.mockResolvedValueOnce(new Response(JSON.stringify({
-      ok: true,
-      receipt: result.receipt,
-      response_signature: "sha256=" + "0".repeat(64),
-    }), { status: 200 }));
+    const receipt = makeReceipt(input);
+    queueSignedResponse(fetcher, receipt, {
+      signature: "sha256=" + "0".repeat(64),
+    });
     await expect(client.dispatch(input)).rejects.toThrow(
       "ASTRBOT_SOCIAL_RESPONSE_SIGNATURE_INVALID",
     );
@@ -201,12 +196,8 @@ describe("AstrBotSocialClient", () => {
     for (const override of (
       [{ channel: "wecom_agent" }, { message_id: "f".repeat(64) }]
     )) {
-      const result = signedResponse(input, override);
-      fetcher.mockResolvedValueOnce(new Response(JSON.stringify({
-        ok: true,
-        receipt: result.receipt,
-        response_signature: result.response_signature,
-      }), { status: 200 }));
+      const receipt = makeReceipt(input, override);
+      queueSignedResponse(fetcher, receipt);
       await expect(client.dispatch(input)).rejects.toThrow(
         "ASTRBOT_SOCIAL_RECEIPT_SCOPE_MISMATCH",
       );
