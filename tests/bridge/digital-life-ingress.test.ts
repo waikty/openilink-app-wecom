@@ -10,8 +10,8 @@ const SECRET = Buffer.from("lanvia-social-bridge-secret-material-0123456789");
 const NOW = 1_800_000_000_000;
 const TIMESTAMP = String(Math.floor(NOW / 1000));
 const NONCE = "nonce_0123456789abcdef";
-const URL = "https://astrbot.example.test/api/platform/webhook/0123456789abcdef0123456789abcdef";
-const PATH = new URL(URL).pathname;
+const WEBHOOK_URL = "https://astrbot.example.test/api/platform/webhook/0123456789abcdef0123456789abcdef";
+const PATH = new URL(WEBHOOK_URL).pathname;
 const TEMP_DIRS: string[] = [];
 
 function secretFile(mode = 0o600): string {
@@ -39,7 +39,7 @@ function message(overrides: Partial<WecomMessageData> = {}): WecomMessageData {
 }
 
 function stableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
   if (Array.isArray(value)) return "[" + value.map(stableJson).join(",") + "]";
   const obj = value as Record<string, unknown>;
   return "{" + Object.keys(obj).sort().map((key) =>
@@ -96,7 +96,7 @@ function createIngress(receiptFactory: (request: {
     }), { status: 200, headers: { "Content-Type": "application/json" } });
   };
   const ingress = new DigitalLifeIngress({
-    webhookUrl: URL,
+    webhookUrl: WEBHOOK_URL,
     tenantId: "tenant-a",
     accountId: options.accountId ?? "wecom-bot-001",
     secretFile: file,
@@ -116,7 +116,7 @@ describe("DigitalLifeIngress", () => {
   it("sends a signed direct WeCom message to the AstrBot webhook and accepts only the Core-authorized reply", async () => {
     const calls = { count: 0 };
     const ingress = createIngress(({ url, init, payload }) => {
-      expect(url).toBe(URL);
+      expect(url).toBe(WEBHOOK_URL);
       expect(payload).toEqual({
         schema: "LANVIA_SOCIAL_TRANSPORT_EVENT_V1",
         channel: "wecom_bot",
@@ -234,7 +234,7 @@ describe("DigitalLifeIngress", () => {
       response_signature: "sha256=" + "0".repeat(64),
     }), { status: 200 });
     const ingress = new DigitalLifeIngress({
-      webhookUrl: URL, tenantId: "tenant-a", accountId: "wecom-bot-001",
+      webhookUrl: WEBHOOK_URL, tenantId: "tenant-a", accountId: "wecom-bot-001",
       secretFile: file, fetchImpl: fetchImpl as typeof fetch,
       now: () => NOW, nonceFactory: () => NONCE,
     });
@@ -245,7 +245,7 @@ describe("DigitalLifeIngress", () => {
   it("rejects a secret file with group or world permissions", () => {
     const file = secretFile(0o644);
     expect(() => new DigitalLifeIngress({
-      webhookUrl: URL, tenantId: "tenant-a", accountId: "wecom-bot-001",
+      webhookUrl: WEBHOOK_URL, tenantId: "tenant-a", accountId: "wecom-bot-001",
       secretFile: file,
     })).toThrow("DIGITAL_LIFE_SECRET_FILE_PERMISSIONS");
   });
