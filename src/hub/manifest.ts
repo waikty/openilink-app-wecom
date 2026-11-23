@@ -32,7 +32,7 @@ export const manifest: AppManifest = {
   slug: "wecom-bridge",
   name: "企业微信 Bridge",
   icon: "\u{1F3E2}",
-  description: "微信 ↔ 企业微信双向消息桥接 + 企业微信 AI Tools",
+  description: "企业微信消息接入同一个 Lanvia Digital Life；企业微信 AI Tools 继续保留，不再默认转发到个人 iLink。",
   events: ["message", "command"],
   scopes: ["tools:write", "config:read"],
   tools: [],
@@ -46,7 +46,7 @@ export const manifest: AppManifest = {
     },
     required: ["wecom_bot_id", "wecom_bot_secret"],
   },
-  guide: `## 企业微信 Bridge 安装指南
+  guide: `## 企业微信 Digital Life Bridge 安装指南
 ### 第 1 步：创建智能机器人
 1. 企业微信管理后台 → 应用管理 → 智能机器人 → 创建
 2. 获取 BotID 和 Secret
@@ -54,6 +54,8 @@ export const manifest: AppManifest = {
 ### 第 3 步：（可选）创建自建应用
 如需通讯录、审批等高级功能，需额外创建自建应用获取 CorpID 和 CorpSecret
 ### 第 4 步：填写上方配置并安装
+
+安装后，企业微信单聊消息会进入 Lanvia AstrBot 的统一 Digital Life。普通消息不会转发到个人微信 iLink，也不会启用 Hub 第二个 AI。群聊暂不接入。平台回复必须由原 Core Access Pass 明确授权；未授权时只接收消息、不发送回复。
 `,
 };
 
