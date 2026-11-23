@@ -65,23 +65,52 @@ describe("loadConfig", () => {
     );
   });
 
-  it("缺少 WECOM_BOT_ID 时抛出错误", () => {
-    const env = makeEnv();
-    expect(() => loadConfig((k) => (k === "WECOM_BOT_ID" ? undefined : env(k)))).toThrow(
-      "缺少必填配置项",
-    );
+  it("云托管模式下没有环境变量 BotID 时等待 Hub 安装配置", () => {
+    const config = loadConfig(makeEnv({
+      WECOM_BOT_ID: "",
+      WECOM_BOT_SECRET: "",
+    }));
+    expect(config.wecomBotId).toBe("");
+    expect(config.wecomBotSecret).toBe("");
   });
 
-  it("缺少 WECOM_BOT_SECRET 时抛出错误", () => {
-    const env = makeEnv();
-    expect(() => loadConfig((k) => (k === "WECOM_BOT_SECRET" ? undefined : env(k)))).toThrow(
-      "缺少必填配置项",
-    );
-  });
-
-  it("同时缺少多个必填项时全部列出", () => {
+  it("只缺少 Hub 或 Base URL 才属于启动必填项错误", () => {
     expect(() => loadConfig(() => undefined)).toThrow(
-      /hubUrl.*baseUrl.*wecomBotId.*wecomBotSecret/,
+      /hubUrl.*baseUrl/,
     );
+  });
+
+  it("Digital Life 三项服务配置必须同时存在", () => {
+    expect(() => loadConfig(makeEnv({
+      LANVIA_ASTRBOT_WEBHOOK_URL: "https://astrbot.example.test/webhook",
+      LANVIA_ASTRBOT_TENANT_ID: "tenant-a",
+    }))).toThrow("Digital Life 接入配置不完整");
+  });
+
+  it("接受完整的 HTTPS Digital Life 接入配置", () => {
+    const config = loadConfig(makeEnv({
+      LANVIA_ASTRBOT_WEBHOOK_URL: "https://astrbot.example.test/webhook",
+      LANVIA_ASTRBOT_TENANT_ID: "tenant-a",
+      LANVIA_ASTRBOT_SECRET_FILE: "/run/secrets/lanvia-social-bridge",
+    }));
+    expect(config.digitalLifeWebhookUrl).toBe("https://astrbot.example.test/webhook");
+    expect(config.digitalLifeTenantId).toBe("tenant-a");
+    expect(config.digitalLifeSecretFile).toBe("/run/secrets/lanvia-social-bridge");
+  });
+
+  it("拒绝 HTTP Digital Life Webhook", () => {
+    expect(() => loadConfig(makeEnv({
+      LANVIA_ASTRBOT_WEBHOOK_URL: "http://astrbot.example.test/webhook",
+      LANVIA_ASTRBOT_TENANT_ID: "tenant-a",
+      LANVIA_ASTRBOT_SECRET_FILE: "/run/secrets/lanvia-social-bridge",
+    }))).toThrow("必须使用 HTTPS");
+  });
+
+  it("拒绝相对路径的签名密钥文件", () => {
+    expect(() => loadConfig(makeEnv({
+      LANVIA_ASTRBOT_WEBHOOK_URL: "https://astrbot.example.test/webhook",
+      LANVIA_ASTRBOT_TENANT_ID: "tenant-a",
+      LANVIA_ASTRBOT_SECRET_FILE: "secrets/social-bridge",
+    }))).toThrow("必须是绝对路径");
   });
 });
