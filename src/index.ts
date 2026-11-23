@@ -286,7 +286,7 @@ async function main(): Promise<void> {
       if (req.method === "POST" && pathname === "/settings/save") {
         await handleSettingsSave(
           req, res, config, store,
-          async (installationId) => { await wecomConnections.restartInstallation(installationId); },
+          async (installationId) => wecomConnections.restartInstallation(installationId),
         );
         return;
       }
