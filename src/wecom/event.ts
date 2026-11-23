@@ -3,18 +3,20 @@
  * 将不同类型的消息（文本、图片、语音、文件）归一化为统一格式
  */
 export interface WecomMessageData {
-  /** 会话 ID */
+  /** 单聊用户 ID；群聊为 chatid */
   conversationId: string;
-  /** 消息 ID */
+  /** 企业微信 BaseMessage.msgid */
   msgId: string;
-  /** 消息类型：text / image / voice / file / mixed */
+  /** text / image / mixed / voice / file / video */
   msgType: string;
-  /** 消息内容（文本消息为文本，其他类型为描述或 URL） */
+  /** 文本内容或媒体占位信息 */
   content: string;
-  /** 发送者用户 ID */
+  /** BaseMessage.from.userid */
   userId: string;
-  /** 发送者用户名 */
+  /** SDK 未保证提供姓名，缺失时为空 */
   userName: string;
+  /** 只允许 single 进入私人 Digital Life 会话 */
+  messageScope: "direct" | "group" | "unknown";
   /** 原始 frame，用于回复 */
   frame: any;
 }
@@ -31,11 +33,16 @@ export type WecomMessageHandler = (
  */
 function extractMessageBase(frame: any): Omit<WecomMessageData, "msgType" | "content"> {
   const body = frame?.body || {};
+  const messageScope = body.chattype === "single"
+    ? "direct"
+    : body.chattype === "group" ? "group" : "unknown";
+  const userId = body.from?.userid || "";
   return {
-    conversationId: body.conversation_id || body.chat_id || "",
-    msgId: body.msg_id || body.message_id || "",
-    userId: body.sender?.user_id || "",
-    userName: body.sender?.name || "",
+    conversationId: messageScope === "group" ? (body.chatid || "") : userId,
+    msgId: body.msgid || "",
+    userId,
+    userName: body.from?.name || "",
+    messageScope,
     frame,
   };
 }
@@ -84,6 +91,12 @@ export function registerWecomEvents(
     });
   });
 
+  /** 图文混排消息：当前只保留事件，不把加密媒体 URL 当成 AI 可读内容 */
+  wsClient.on("message.mixed", (frame: any) => {
+    const base = extractMessageBase(frame);
+    onMessage({ ...base, msgType: "mixed", content: "[图文混排]" });
+  });
+
   /** 文件消息 */
   wsClient.on("message.file", (frame: any) => {
     const base = extractMessageBase(frame);
@@ -97,9 +110,16 @@ export function registerWecomEvents(
     });
   });
 
+  /** 视频消息：媒体需通过 SDK 解密后再交给视觉处理链路 */
+  wsClient.on("message.video", (frame: any) => {
+    const base = extractMessageBase(frame);
+    const content = frame.body?.video?.url || "[视频]";
+    onMessage({ ...base, msgType: "video", content });
+  });
+
   /** 进入会话事件（仅打印日志，不触发消息回调） */
   wsClient.on("event.enter_chat", (frame: any) => {
-    const userId = frame.body?.sender?.user_id || "unknown";
+    const userId = frame.body?.from?.userid || "unknown";
     console.log(`[WecomEvent] 用户 ${userId} 进入会话`);
   });
 }
