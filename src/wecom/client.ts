@@ -1,4 +1,4 @@
-import AiBot from "@wecom/aibot-node-sdk";
+import AiBot, { generateReqId } from "@wecom/aibot-node-sdk";
 
 /** 企业微信 OpenAPI 基础地址 */
 const QYAPI_BASE = "https://qyapi.weixin.qq.com/cgi-bin";
@@ -82,11 +82,9 @@ export class WecomClient {
    * @param content 回复内容（Markdown 格式）
    */
   async replyStream(frame: any, content: string): Promise<void> {
-    /** 生成唯一 streamId */
-    const streamId = `stream_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-    /** 一次性发送完整内容并标记结束 */
-    this.wsClient.replyStream(frame, streamId, content, true);
+    /** 使用官方 SDK 的请求 ID，并等待企业微信确认回复 */
+    const streamId = generateReqId("stream");
+    await this.wsClient.replyStream(frame, streamId, content, true);
   }
 
   /**
