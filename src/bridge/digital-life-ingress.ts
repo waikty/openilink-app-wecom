@@ -147,7 +147,11 @@ export class DigitalLifeIngress {
     if (message.msgType !== "text" && message.msgType !== "voice") {
       fail("WECOM_MESSAGE_TYPE_NOT_SUPPORTED");
     }
-    const text = identifier(message.content, "WECOM_TEXT_REQUIRED", 4096);
+    const text = message.content;
+    if (typeof text !== "string" || !text.trim() || text.length > 4096 ||
+        /[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]/.test(text)) {
+      fail("WECOM_TEXT_REQUIRED");
+    }
     const messageId = messageDigest(this.tenantId, this.channel, this.accountId, msgId);
     const payload = {
       schema: REQUEST_SCHEMA,
