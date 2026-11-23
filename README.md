@@ -4,7 +4,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?logo=typescript)](https://www.typescriptlang.org/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker)](Dockerfile)
 
-**微信 ↔ 企业微信双向消息桥接 + 18 个 AI Tools** — 消息、通讯录、日程、审批、打卡、微盘、客户联系全覆盖。
+**企业微信 → AstrBot → 同一个 Lanvia Digital Life + 18 个企业微信 AI Tools** — 企业微信单聊进入统一 AI；不再默认转发到个人微信 iLink。
 
 > 本项目是 [OpeniLink Hub](https://github.com/openilink/openilink-hub) 的官方 App。Hub 是开源的微信 Bot 管理平台 + App 应用市场。
 
@@ -12,7 +12,9 @@
 
 - **智能机器人长连接** — 基于 `@wecom/aibot-node-sdk` WebSocket 协议，无需公网回调即可接收消息
 - **流式回复** — 支持 Markdown 流式回复，用户体验流畅
-- **双向消息桥接** — 微信 → 企业微信、企业微信 → 微信自动转发
+- **统一 AI 入站** — 企业微信单聊经签名验证进入 AstrBot，与个人 iLink、微信客服、QQ 共用同一个 Digital Life 会话身份
+- **授权回复** — 只有 AstrBot 返回同请求签名回执且原 Core Access Pass 明确允许时，才回复原企业微信会话
+- **旧转发停用** — 普通企业微信消息不再转发到个人微信 iLink，避免出现两个 AI 或重复消息
 - **18 个 AI Tools** — 覆盖消息发送、通讯录、日程、审批、打卡、微盘、客户联系等核心场景
 - **OAuth 自动安装** — 支持 PKCE 安全授权流程
 - **SQLite 持久化** — 安装记录与消息关联可靠存储
@@ -24,7 +26,7 @@
 
 ### 自然语言（推荐）
 
-直接用微信跟 Bot 对话，Hub AI 会自动识别意图并调用对应功能：
+直接在企业微信单聊中向 Digital Life 发消息；Hub 内置 AI 必须保持关闭，避免第二个 AI 抢答。企业微信工具仍由同一个 Digital Life 通过已授权工具链调用：
 
 - "用企业微信通知全组明天开会"
 - "查一下打卡记录"
@@ -135,6 +137,10 @@ npm run build && npm start  # 生产模式
 | `WECOM_CORP_SECRET` | 否 | — | 应用 Secret（OpenAPI 调用需要） |
 | `PORT` | 否 | `8085` | HTTP 监听端口 |
 | `DB_PATH` | 否 | `data/wecom.db` | SQLite 数据库文件路径 |
+| `LANVIA_ASTRBOT_WEBHOOK_URL` | Digital Life 模式必填 | — | AstrBot 现有社交 Webhook 的完整 HTTPS 地址 |
+| `LANVIA_ASTRBOT_TENANT_ID` | Digital Life 模式必填 | — | Core 可信租户 ID |
+| `LANVIA_ASTRBOT_ACCOUNT_ID` | 否 | 安装配置中的 BotID | Core 绑定的企业微信 Bot accountId |
+| `LANVIA_ASTRBOT_SECRET_FILE` | Digital Life 模式必填 | — | AstrBot 共用的内部签名密钥文件绝对路径；至少 32 字节，Linux 权限 0600/0400 |
 
 </details>
 
@@ -162,6 +168,14 @@ npm run build && npm start  # 生产模式
    - **客户联系** — 外部联系人读取
 4. 设置应用可见范围
 
+### Digital Life 接入要求
+
+- Hub App 安装后会从加密的安装配置中读取 BotID / Secret，并启动对应 WebSocket 客户端；设置页保存凭证后会重启客户端。
+- Digital Life 模式只接受企业微信 **single 单聊** 的文本和语音转写文本；群聊、图片、文件暂不进入私人会话。
+- AstrBot 必须预先创建 `wecom_bot` 平台实例，并注入原 Core 身份验证、现有 AstrBot SQLite inbox、统一 Digital Life 调度器及 Core 社交回复授权检查。
+- `LANVIA_ASTRBOT_SECRET_FILE` 必须以只读方式挂载到容器；不要把密钥放进 Hub 安装表单、URL、日志或 SQLite。
+- Core 未返回有效的 `digital-life:social:reply` Access Pass 回执时，Bridge 只接收，不回复。此 App 不创建授权、不写长期记忆、不执行 Runner。
+
 ### HTTP 路由
 
 | 路径 | 方法 | 说明 |
@@ -181,21 +195,21 @@ npm run build && npm start  # 生产模式
 
 ```mermaid
 graph LR
-    WX[微信用户] -->|消息| HUB[OpeniLink Hub]
-    HUB -->|Webhook| APP["@openilink/app-wecom"]
-    APP -->|OpenAPI| WECOM[企业微信]
-    WECOM -->|WebSocket| APP
-    APP -->|Hub API| HUB
-    HUB -->|消息| WX
+    WECOM[企业微信单聊] -->|WebSocket| APP["@openilink/app-wecom 0.2.0"]
+    APP -->|HMAC signed ingress| ASTRBOT[AstrBot]
+    ASTRBOT --> DL[唯一 Digital Life]
+    DL -->|Core Access Pass reply receipt| ASTRBOT
+    ASTRBOT -->|signed reply receipt| APP
+    APP -->|原消息流式回复| WECOM
+    WX[个人微信 iLink] -->|独立原生入口| ASTRBOT
 
     subgraph APP
         direction TB
         IDX[index.ts 主入口]
-        RT[Router 命令路由]
-        B1[WxToWecom 桥接]
-        B2[WecomToWx 桥接]
-        TL[18 AI Tools]
-        ST[Store SQLite]
+        RT[显式命令 / 工具路由]
+        DLIngress[DigitalLifeIngress 签名适配器]
+        TL[18 企业微信 Tools]
+        ST[安装凭证加密存储]
     end
 ```
 
@@ -206,7 +220,7 @@ graph LR
 - **消息内容不落盘** — 消息内容仅在内存中中转，不会存储到数据库或磁盘
 - **仅保存消息 ID 映射** — 数据库中只保存消息 ID 对应关系（用于回复路由），不保存消息正文
 - **用户数据严格隔离** — 所有查询均按 `installation_id` + `user_id` 双重过滤，不同用户之间完全隔离
-- **应用市场安装（托管模式）** — 不会记录、存储或分析用户的消息内容；所有代码完全开源，接受社区审查
+- **应用市场安装（托管模式）** — Bridge 自身不保存消息正文；消息由 AstrBot 现有 SQLite durable inbox 接收并去重，长期记忆仍由既有 Memory Hub/Workbench 权威负责
 - **自部署** — 如需更高隐私保障，可自行部署，所有数据仅在您自己的服务器上流转
 
 ## License
