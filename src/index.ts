@@ -114,8 +114,6 @@ async function main(): Promise<void> {
       localConfig.wecom_corp_secret || config.wecomCorpSecret || undefined,
       localConfig.wecom_agent_id || config.wecomAgentId || undefined,
     );
-    await client.start();
-
     const { definitions: runtimeDefinitions, handlers } = collectAllTools(client);
     const runtimeRouter = new Router();
     runtimeRouter.register(runtimeDefinitions, handlers);
@@ -188,6 +186,14 @@ async function main(): Promise<void> {
         console.warn("[wecom] Digital Life 消息未进入可回复状态:", code);
       }
     });
+
+    try {
+      // 先挂好事件监听，再建立 WebSocket，避免认证成功后首条消息抢在监听器前到达。
+      await client.start();
+    } catch (err) {
+      await stopWecomRuntime();
+      throw err;
+    }
 
     console.log("[wecom] 企业微信 Bot 长连接已启动: account=%s", botId);
     if (selected) {
@@ -323,7 +329,12 @@ async function main(): Promise<void> {
           try {
             const remoteConfig = await mode2Hub.fetchConfig();
             if (Object.keys(remoteConfig).length > 0) {
-              store.saveConfig(installation.id, remoteConfig, installation.appToken);
+              const existingConfig = store.getConfig(installation.id, installation.appToken) ?? {};
+              store.saveConfig(
+                installation.id,
+                { ...existingConfig, ...remoteConfig },
+                installation.appToken,
+              );
             }
           } catch (err) {
             console.error("[wecom] 模式2: 拉取配置失败:", err);
