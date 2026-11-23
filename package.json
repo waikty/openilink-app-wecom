@@ -10,7 +10,8 @@
     "dev": "tsx src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run tests/integration/"
+    "test:integration": "vitest run tests/integration/",
+    "test:social": "vitest run tests/digital-life-bridge.test.ts tests/wecom-event.test.ts"
   },
   "dependencies": {
     "@wecom/aibot-node-sdk": "^1.0.0",
