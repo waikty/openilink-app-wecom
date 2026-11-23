@@ -63,9 +63,14 @@ export class WecomConnectionManager {
     let connected = 0;
     let skipped = 0;
     for (const installation of this.store.getAllInstallations()) {
-      const result = await this.startInstallation(installation.id);
-      if (result) connected += 1;
-      else skipped += 1;
+      try {
+        const result = await this.startInstallation(installation.id);
+        if (result) connected += 1;
+        else skipped += 1;
+      } catch {
+        skipped += 1;
+        console.error("[wecom] Bot connection failed; installation=%s", installation.id);
+      }
     }
     return { connected, skipped };
   }
@@ -106,7 +111,9 @@ export class WecomConnectionManager {
         console.error(
           "[wecom] Digital Life message handling failed; installation=%s code=%s",
           installationId,
-          error instanceof Error ? error.message : "UNKNOWN",
+          error instanceof Error && /^[A-Z0-9_]+$/.test(error.message)
+            ? error.message
+            : "UNCLASSIFIED",
         );
       }
     });
