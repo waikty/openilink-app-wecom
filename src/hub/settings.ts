@@ -139,7 +139,7 @@ export async function handleSettingsSave(
   res: ServerResponse,
   config: Config,
   store: Store,
-  onConfigurationSaved?: (installationId: string) => Promise<void>,
+  onConfigurationSaved?: (installationId: string) => Promise<boolean | void>,
 ): Promise<void> {
   const body = await readBody(req);
   const formData = new URLSearchParams(body.toString());
