@@ -3,10 +3,10 @@ import { registerWecomEvents } from "../../src/wecom/event.js";
 
 function register() {
   const handlers = new Map<string, (frame: any) => void>();
+  const received: any[] = [];
   registerWecomEvents({
     on: (name: string, handler: (frame: any) => void) => handlers.set(name, handler),
   }, (message) => received.push(message));
-  const received: any[] = [];
   return { handlers, received };
 }
 
